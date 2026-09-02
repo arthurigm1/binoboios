@@ -27,6 +27,8 @@ workflows:
     integrations:
       app_store_connect: "Orlando Messias"   # chave do Developer Portal (Key 22Y7YXXM34)
     environment:
+      groups:
+        - ios_signing   # grupo com CERTIFICATE_PRIVATE_KEY (Environment variables do app)
       vars:
         BUNDLE_ID: "br.com.binobo"
         XCODE_WORKSPACE: "src/binobo.xcworkspace"
@@ -76,6 +78,8 @@ workflows:
     integrations:
       app_store_connect: "Orlando Messias"   # mesma chave do workflow acima
     environment:
+      groups:
+        - ios_signing   # grupo com CERTIFICATE_PRIVATE_KEY (Environment variables do app)
       vars:
         BUNDLE_ID: "br.com.binobo"
         XCODE_WORKSPACE: "src/binobo.xcworkspace"
