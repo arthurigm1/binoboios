@@ -1,0 +1,101 @@
+# Build e publicação do app iOS do binobo (WebView do binobo.com.br, gerado pelo
+# PWABuilder e com Firebase Messaging para push).
+#
+# Duas particularidades deste repositório — as duas quebram a config de exemplo
+# da documentação do Codemagic se copiada como está:
+#
+#   1. O projeto Xcode NÃO está na raiz, está em `src/`. Por isso o `pod install`
+#      roda dentro de src/ e o workspace vai com o caminho completo.
+#   2. O Podfile traz Firebase/Messaging, então é `pod install` de verdade:
+#      buildar o .xcodeproj em vez do .xcworkspace falha por dependência ausente.
+#
+# Os dois workflows são escritos por extenso, sem âncoras YAML: com `<<:` a
+# sobrescrita parcial de `vars` derrubava o `ios_signing` do workflow principal —
+# e um bundle identifier que some é o tipo de erro que só aparece na hora de
+# assinar, dez minutos de build depois.
+#
+# ANTES DO PRIMEIRO BUILD, ajuste os pontos marcados com «AJUSTE».
+
+workflows:
+  # ── Só compila e assina. Use este primeiro. ────────────────────────────────
+  # Não depende de o app já existir no App Store Connect, então serve para
+  # validar assinatura, pods e projeto antes de mexer na loja.
+  ios-validacao:
+    name: binobo iOS — validação (sem publicar)
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: codemagic   # «AJUSTE» nome da integração em Team settings → Integrations
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: br.com.binobo
+      vars:
+        XCODE_WORKSPACE: "src/binobo.xcworkspace"
+        XCODE_SCHEME: "binobo"
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Dependências do CocoaPods
+        # O Podfile está em src/; `pod install` procura no diretório atual e
+        # falharia com "No Podfile found" se rodasse da raiz.
+        script: cd src && pod install
+      - name: Perfis de provisionamento no projeto
+        script: xcode-project use-profiles
+      - name: Build do IPA
+        script: |
+          xcode-project build-ipa \
+            --workspace "$CM_BUILD_DIR/$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      # Os logs do xcodebuild são o que salva quando quebra por assinatura ou
+      # por pod: sem eles resta adivinhar pelo código de saída.
+      - /tmp/xcodebuild_logs/*.log
+
+  # ── Publicação no TestFlight ───────────────────────────────────────────────
+  ios-binobo:
+    name: binobo iOS — TestFlight
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: codemagic   # «AJUSTE» mesmo nome da integração
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: br.com.binobo
+      vars:
+        XCODE_WORKSPACE: "src/binobo.xcworkspace"
+        XCODE_SCHEME: "binobo"
+        APP_STORE_APPLE_ID: 0000000000   # «AJUSTE» id numérico do app no App Store Connect
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Dependências do CocoaPods
+        script: cd src && pod install
+      - name: Perfis de provisionamento no projeto
+        script: xcode-project use-profiles
+      - name: Número de build acima do último enviado
+        # A App Store recusa build com número repetido. Lê o último que ela
+        # aceitou e soma 1, para não depender de alguém lembrar de incrementar.
+        # `agvtool` roda dentro de src/, onde está o projeto.
+        script: |
+          cd "$CM_BUILD_DIR/src"
+          ULTIMO=$(app-store-connect get-latest-app-store-build-number "$APP_STORE_APPLE_ID")
+          agvtool new-version -all $((ULTIMO + 1))
+      - name: Build do IPA
+        script: |
+          xcode-project build-ipa \
+            --workspace "$CM_BUILD_DIR/$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        # Envio para revisão fica MANUAL de propósito: um app que embrulha um
+        # site cai na diretriz 4.2 (Minimum Functionality) e costuma precisar de
+        # justificativa. Melhor mandar quando alguém estiver acompanhando.
+        submit_to_app_store: false
