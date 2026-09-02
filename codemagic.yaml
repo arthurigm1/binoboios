@@ -27,10 +27,8 @@ workflows:
     integrations:
       app_store_connect: codemagic   # «AJUSTE» nome da integração em Team settings → Integrations
     environment:
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: br.com.binobo
       vars:
+        BUNDLE_ID: "br.com.binobo"
         XCODE_WORKSPACE: "src/binobo.xcworkspace"
         XCODE_SCHEME: "binobo"
       xcode: latest
@@ -40,8 +38,25 @@ workflows:
         # O Podfile está em src/; `pod install` procura no diretório atual e
         # falharia com "No Podfile found" se rodasse da raiz.
         script: cd src && pod install
-      - name: Perfis de provisionamento no projeto
-        script: xcode-project use-profiles
+      - name: Certificado e perfil de distribuição
+        # `environment.ios_signing` apenas BUSCA um perfil que já exista, e foi o
+        # que derrubou o build 2 com "No matching profiles found ... app_store":
+        # não havia perfil nenhum para br.com.binobo, e misturar as duas formas
+        # (o bloco declarativo + estes comandos) é justamente o que a
+        # documentação aponta como causa dessa mensagem.
+        # `--create` cria o perfil E o certificado quando faltam.
+        #
+        # PRÉ-REQUISITO QUE NENHUM COMANDO RESOLVE: o Bundle ID br.com.binobo
+        # precisa estar registrado em developer.apple.com (Certificates,
+        # Identifiers & Profiles → Identifiers). O --create não registra
+        # identificador novo — se ele não existir, este passo falha aqui.
+        script: |
+          keychain initialize
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create
+          keychain add-certificates
+          xcode-project use-profiles
       - name: Build do IPA
         script: |
           xcode-project build-ipa \
@@ -61,10 +76,8 @@ workflows:
     integrations:
       app_store_connect: codemagic   # «AJUSTE» mesmo nome da integração
     environment:
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: br.com.binobo
       vars:
+        BUNDLE_ID: "br.com.binobo"
         XCODE_WORKSPACE: "src/binobo.xcworkspace"
         XCODE_SCHEME: "binobo"
         APP_STORE_APPLE_ID: 0000000000   # «AJUSTE» id numérico do app no App Store Connect
@@ -73,8 +86,15 @@ workflows:
     scripts:
       - name: Dependências do CocoaPods
         script: cd src && pod install
-      - name: Perfis de provisionamento no projeto
-        script: xcode-project use-profiles
+      - name: Certificado e perfil de distribuição
+        # Mesmo fluxo do workflow de validação — ver o comentário longo lá.
+        script: |
+          keychain initialize
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create
+          keychain add-certificates
+          xcode-project use-profiles
       - name: Número de build acima do último enviado
         # A App Store recusa build com número repetido. Lê o último que ela
         # aceitou e soma 1, para não depender de alguém lembrar de incrementar.
